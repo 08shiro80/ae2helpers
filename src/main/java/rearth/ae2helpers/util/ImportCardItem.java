@@ -18,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.neoforged.fml.ModList;
 import org.jetbrains.annotations.NotNull;
 import rearth.ae2helpers.ae2helpers;
 import rearth.ae2helpers.client.ImportCardClientHelper;
@@ -57,6 +58,8 @@ public class ImportCardItem extends UpgradeCardItem {
                 upgrades = upgradeHost.ae2helpers$getUpgradeInventory();
             } else if (te instanceof PatternProviderBlockEntity provider && provider.getLogic() instanceof IPatternProviderUpgradeHost upgradeHost) {
                 upgrades = upgradeHost.ae2helpers$getUpgradeInventory();
+            } else if (te != null && ModList.get().isLoaded("advanced_ae")) {
+                upgrades = AdvancedAeCardCompat.getUpgradeInventory(te, context.getClickLocation());
             }
             
             if (upgrades != null) {
