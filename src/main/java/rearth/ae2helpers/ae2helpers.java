@@ -21,8 +21,11 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import org.slf4j.Logger;
 import rearth.ae2helpers.network.FillCraftingSlotPacket;
 import rearth.ae2helpers.network.UpdateImportCardPacket;
+import rearth.ae2helpers.network.UpdateRedstoneCardPacket;
 import rearth.ae2helpers.util.ImportCardConfig;
 import rearth.ae2helpers.util.ImportCardItem;
+import rearth.ae2helpers.util.RedstoneCardConfig;
+import rearth.ae2helpers.util.RedstoneCardItem;
 
 @Mod(ae2helpers.MODID)
 public class ae2helpers {
@@ -43,10 +46,20 @@ public class ae2helpers {
                                                         .networkSynchronized(ImportCardConfig.STREAM_CODEC)
                                                         .cacheEncoding()
                                                         .build());
+
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<RedstoneCardConfig>> REDSTONE_CARD_CONFIG =
+      COMPONENTS.register("redstone_card_config", () -> DataComponentType.<RedstoneCardConfig>builder()
+                                                          .persistent(RedstoneCardConfig.CODEC)
+                                                          .networkSynchronized(RedstoneCardConfig.STREAM_CODEC)
+                                                          .cacheEncoding()
+                                                          .build());
     
     public static final DeferredItem<Item> RESULT_IMPORT_CARD =
       ITEMS.registerItem("result_import_card", ImportCardItem::new, new Item.Properties());
-    
+
+    public static final DeferredItem<Item> REDSTONE_CARD =
+      ITEMS.registerItem("redstone_card", RedstoneCardItem::new, new Item.Properties());
+
     
     public ae2helpers(IEventBus modEventBus, ModContainer modContainer) {
         
@@ -66,12 +79,14 @@ public class ae2helpers {
         
         // ideally we'd define the machine(s) as target here, but that then breaks with other mods that add upgrades to the machine
         Upgrades.add(RESULT_IMPORT_CARD.get(), RESULT_IMPORT_CARD, 1, "gui.ae2helpers.import_card");
-        
+        Upgrades.add(REDSTONE_CARD.get(), RESULT_IMPORT_CARD, 1, "gui.ae2helpers.import_card");
+
     }
     
     private void injectToAETab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == AECreativeTabIds.MAIN) {
             event.accept(RESULT_IMPORT_CARD);
+            event.accept(REDSTONE_CARD);
         }
     }
     
@@ -88,6 +103,12 @@ public class ae2helpers {
           UpdateImportCardPacket.TYPE,
           UpdateImportCardPacket.STREAM_CODEC,
           UpdateImportCardPacket::handle
+        );
+
+        registrar.playToServer(
+          UpdateRedstoneCardPacket.TYPE,
+          UpdateRedstoneCardPacket.STREAM_CODEC,
+          UpdateRedstoneCardPacket::handle
         );
     }
 }

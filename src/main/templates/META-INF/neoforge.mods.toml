@@ -52,6 +52,11 @@ config="${mod_id}.mixins.json"
 [[mixins]]
 config="${mod_id}.aae.mixins.json"
 
+# Redstone card mixins (core + optional-mod block variants). Optional-mod mixins are skipped
+# automatically when the respective mod is absent.
+[[mixins]]
+config="${mod_id}.redstone.mixins.json"
+
 # The [[accessTransformers]] block allows you to declare where your AT file is.
 # If this block is omitted, a fallback attempt will be made to load an AT from META-INF/accesstransformer.cfg
 #[[accessTransformers]]

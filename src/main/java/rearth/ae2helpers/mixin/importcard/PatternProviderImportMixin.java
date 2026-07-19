@@ -29,8 +29,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import rearth.ae2helpers.ae2helpers;
 import rearth.ae2helpers.util.IPatternProviderUpgradeHost;
+import rearth.ae2helpers.util.IProviderRedstoneHost;
 import rearth.ae2helpers.util.ImportCardConfig;
 import rearth.ae2helpers.util.PatternProviderImportContext;
+import rearth.ae2helpers.util.RedstoneCardConfig;
 
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -38,12 +40,13 @@ import java.util.List;
 import java.util.Map;
 
 @Mixin(PatternProviderLogic.class)
-public abstract class PatternProviderImportMixin implements IPatternProviderUpgradeHost {
-    
+public abstract class PatternProviderImportMixin implements IPatternProviderUpgradeHost, IProviderRedstoneHost {
+
     @Shadow @Final private IManagedGridNode mainNode;
     @Shadow @Final private IActionSource actionSource;
     @Shadow @Final private PatternProviderLogicHost host;
     @Shadow public abstract void saveChanges();
+    @Shadow public abstract List<IPatternDetails> getAvailablePatterns();
     
     // cached import strategy per provider target side
     @Unique private final Map<Direction, StackImportStrategy> ae2helpers$importStrategies = new EnumMap<>(Direction.class);
@@ -57,6 +60,12 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
     // Keys the crafting service has actually tracked (getRequestedAmount > 0) at least once.
     // Only then is a later "0" a trustworthy "craft finished" signal.
     @Unique private final java.util.Set<AEKey> ae2helpers$confirmedCrafts = new java.util.HashSet<>();
+
+    // redstone emission state, recomputed each tick; neighbor updates fire only on change
+    @Unique private boolean ae2helpers$emitting = false;
+    @Unique private boolean ae2helpers$emittingStrong = false;
+    @Unique private boolean ae2helpers$wasCraftingActive = false;
+    @Unique private long ae2helpers$pulseEndTick = 0;
     
     @Unique private int ae2helpers$cyclesSinceLastCheck = 0;
     @Unique private float ae2helpers$currentCycleDelay = 1f;
@@ -64,7 +73,14 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
     
     @Inject(method = "<init>(Lappeng/api/networking/IManagedGridNode;Lappeng/helpers/patternprovider/PatternProviderLogicHost;I)V",at = @At("TAIL"))
     private void ae2extras$initUpgrade(IManagedGridNode mainNode, PatternProviderLogicHost host, int patternInventorySize, CallbackInfo ci) {
-        this.ae2helpers$upgradeSlots = UpgradeInventories.forMachine(ae2helpers.RESULT_IMPORT_CARD, 1, this::saveChanges);
+        this.ae2helpers$upgradeSlots = UpgradeInventories.forMachine(ae2helpers.RESULT_IMPORT_CARD, 2, this::ae2helpers$onUpgradesChanged);
+    }
+
+    @Unique
+    private void ae2helpers$onUpgradesChanged() {
+        this.saveChanges();
+        // wake the device so the redstone state gets re-checked after a card change
+        this.mainNode.ifPresent((grid, node) -> grid.getTickManager().alertDevice(node));
     }
     
     @Inject(method = "pushPattern", at = @At("RETURN"))
@@ -162,11 +178,24 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
             }
         }
     }
-    
+
+    @Inject(method = "doWork", at = @At("RETURN"))
+    private void ae2helpers$redstoneDoWork(CallbackInfoReturnable<Boolean> cir) {
+        ae2helpers$updateRedstone();
+    }
+
     @Inject(method = "hasWorkToDo", at = @At("RETURN"), cancellable = true)
     private void ae2helpers$hasWorkToDo(CallbackInfoReturnable<Boolean> cir) {
+        if (cir.getReturnValue()) return;
+
+        // stay awake to poll the redstone-emission state each tick
+        if (ae2helpers$hasRedstoneCard()) {
+            cir.setReturnValue(true);
+            return;
+        }
+
         // If AE2 thinks it's asleep, check if we need to wake up
-        if (!cir.getReturnValue() && ae2helpers$hasImportCard()) {
+        if (ae2helpers$hasImportCard()) {
             var config = ae2helpers$getConfig();
             // Wake up if: "Import All" mode is ON, OR we have specific results waiting
             if (!config.resultsOnly() || !ae2helpers$expectedResults.isEmpty()) {
@@ -255,15 +284,102 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
     
     @Unique
     private ImportCardConfig ae2helpers$getConfig() {
-        if (!ae2helpers$hasImportCard()) return ImportCardConfig.DEFAULT;
-        var stack = ae2helpers$upgradeSlots.getStackInSlot(0);
+        var stack = ae2helpers$findCard(ae2helpers.RESULT_IMPORT_CARD.get());
+        if (stack == null) return ImportCardConfig.DEFAULT;
         return stack.getOrDefault(ae2helpers.IMPORT_CARD_CONFIG.get(), ImportCardConfig.DEFAULT);
     }
-    
+
+    @Unique
+    private net.minecraft.world.item.ItemStack ae2helpers$findCard(net.minecraft.world.item.Item card) {
+        for (int i = 0; i < ae2helpers$upgradeSlots.size(); i++) {
+            var stack = ae2helpers$upgradeSlots.getStackInSlot(i);
+            if (!stack.isEmpty() && stack.is(card)) return stack;
+        }
+        return null;
+    }
+
     @Unique
     private boolean ae2helpers$hasImportCard() {
-        return !ae2helpers$upgradeSlots.getStackInSlot(0).isEmpty()
-                 && ae2helpers$upgradeSlots.getStackInSlot(0).is(ae2helpers.RESULT_IMPORT_CARD.get());
+        return ae2helpers$findCard(ae2helpers.RESULT_IMPORT_CARD.get()) != null;
+    }
+
+    @Unique
+    private boolean ae2helpers$hasRedstoneCard() {
+        return ae2helpers$findCard(ae2helpers.REDSTONE_CARD.get()) != null;
+    }
+
+    @Override
+    public boolean ae2helpers$isEmittingRedstone() {
+        return ae2helpers$emitting;
+    }
+
+    @Override
+    public boolean ae2helpers$isEmittingStrongRedstone() {
+        return ae2helpers$emittingStrong;
+    }
+
+    @Override
+    public Direction ae2helpers$getRedstoneSide() {
+        var config = ae2helpers$getRedstoneConfig();
+        return config == null ? null : config.side();
+    }
+
+    @Unique
+    private RedstoneCardConfig ae2helpers$getRedstoneConfig() {
+        var stack = ae2helpers$findCard(ae2helpers.REDSTONE_CARD.get());
+        if (stack == null) return null;
+        return stack.getOrDefault(ae2helpers.REDSTONE_CARD_CONFIG.get(), RedstoneCardConfig.DEFAULT);
+    }
+
+    @Unique
+    private boolean ae2helpers$isCraftingActive() {
+        var grid = this.mainNode.getGrid();
+        if (grid == null) return false;
+        var craftingService = grid.getCraftingService();
+        if (craftingService == null) return false;
+
+        for (var pattern : this.getAvailablePatterns()) {
+            for (var output : pattern.getOutputs()) {
+                if (output != null && craftingService.isRequesting(output.what())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @Unique
+    private void ae2helpers$updateRedstone() {
+        var be = this.host.getBlockEntity();
+        var level = be != null ? be.getLevel() : null;
+        var config = ae2helpers$getRedstoneConfig();
+
+        boolean newEmitting;
+        if (config == null || level == null) {
+            newEmitting = false;
+            ae2helpers$wasCraftingActive = false;
+        } else {
+            var active = ae2helpers$isCraftingActive();
+            switch (config.mode()) {
+                case INVERTED -> newEmitting = !active;
+                case PULSE -> {
+                    if (active != ae2helpers$wasCraftingActive) {
+                        ae2helpers$pulseEndTick = level.getGameTime() + Math.max(1, config.pulseLength());
+                    }
+                    newEmitting = level.getGameTime() < ae2helpers$pulseEndTick;
+                }
+                default -> newEmitting = active;
+            }
+            ae2helpers$wasCraftingActive = active;
+        }
+        var newStrong = newEmitting && config != null && config.strongSignal();
+
+        if (newEmitting == ae2helpers$emitting && newStrong == ae2helpers$emittingStrong) return;
+        ae2helpers$emitting = newEmitting;
+        ae2helpers$emittingStrong = newStrong;
+
+        if (level == null || level.isClientSide) return;
+        level.updateNeighborsAt(be.getBlockPos(), be.getBlockState().getBlock());
     }
     
     @Inject(method = "clearContent", at = @At("HEAD"))
