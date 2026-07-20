@@ -3,6 +3,7 @@
   "package": "rearth.ae2helpers.mixin.redstone",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "ImportBusLinkMixin",
     "PatternProviderRedstoneBlockMixin",
     "PatternProviderRedstonePartMixin",
     "aae.AdvPatternProviderRedstoneBlockMixin",

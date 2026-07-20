@@ -28,11 +28,13 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import rearth.ae2helpers.ae2helpers;
+import rearth.ae2helpers.util.ILinkedImportTarget;
 import rearth.ae2helpers.util.IPatternProviderUpgradeHost;
 import rearth.ae2helpers.util.IProviderRedstoneHost;
 import rearth.ae2helpers.util.ImportCardConfig;
 import rearth.ae2helpers.util.PatternProviderImportContext;
 import rearth.ae2helpers.util.RedstoneCardConfig;
+import rearth.ae2helpers.util.RedstoneMode;
 
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -42,13 +44,12 @@ import java.util.Map;
 // Advanced AE reimplements the pattern provider with its own classes, so it needs its own copy
 // of the import logic. Kept in sync with rearth.ae2helpers.mixin.importcard.PatternProviderImportMixin.
 @Mixin(AdvPatternProviderLogic.class)
-public abstract class AdvPatternProviderImportMixin implements IPatternProviderUpgradeHost, IProviderRedstoneHost {
+public abstract class AdvPatternProviderImportMixin implements IPatternProviderUpgradeHost, IProviderRedstoneHost, ILinkedImportTarget {
 
     @Shadow @Final private IManagedGridNode mainNode;
     @Shadow @Final private IActionSource actionSource;
     @Shadow @Final private AdvPatternProviderLogicHost host;
     @Shadow public abstract void saveChanges();
-    @Shadow public abstract List<IPatternDetails> getAvailablePatterns();
 
     // cached import strategy per provider target side
     @Unique private final Map<Direction, StackImportStrategy> ae2helpers$importStrategies = new EnumMap<>(Direction.class);
@@ -73,6 +74,11 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
     @Unique private float ae2helpers$currentCycleDelay = 1f;
     @Unique private static final int AEHELPERS$MAX_CYCLE_DELAY = 10;
 
+    // last game tick something was actually imported; keep importing a machine's surplus even after
+    // AE2 already considers the craft finished (only drop expectations once it stops yielding).
+    @Unique private long ae2helpers$lastImportTick = Long.MIN_VALUE;
+    @Unique private static final long AEHELPERS$IMPORT_IDLE_TIMEOUT = 200;
+
     @Inject(method = "<init>(Lappeng/api/networking/IManagedGridNode;Lnet/pedroksl/advanced_ae/common/logic/AdvPatternProviderLogicHost;I)V", at = @At("TAIL"))
     private void ae2helpers$initUpgrade(IManagedGridNode mainNode, AdvPatternProviderLogicHost host, int patternInventorySize, CallbackInfo ci) {
         this.ae2helpers$upgradeSlots = UpgradeInventories.forMachine(ae2helpers.RESULT_IMPORT_CARD, 2, this::ae2helpers$onUpgradesChanged);
@@ -88,7 +94,7 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
     @Inject(method = "pushPattern", at = @At("RETURN"))
     private void ae2helpers$onPushPattern(IPatternDetails patternDetails, KeyCounter[] inputHolder, CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValue()) {
-            if (!ae2helpers$hasImportCard()) return;
+            if (!ae2helpers$hasImportCard() && !ae2helpers$hasRedstoneCard()) return;
 
             for (var output : patternDetails.getOutputs()) {
                 if (output != null) {
@@ -98,10 +104,31 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
 
             ae2helpers$currentCycleDelay = 1;
             ae2helpers$cyclesSinceLastCheck = 0;
+
+            var be = this.host.getBlockEntity();
+            if (be != null && be.getLevel() != null) ae2helpers$lastImportTick = be.getLevel().getGameTime();
+
             this.saveChanges();
 
             this.mainNode.ifPresent((grid, node) -> grid.getTickManager().alertDevice(node));
         }
+    }
+
+    @Override
+    public void ae2helpers$onLinkedImport() {
+        var be = this.host.getBlockEntity();
+        if (be != null && be.getLevel() != null) ae2helpers$lastImportTick = be.getLevel().getGameTime();
+    }
+
+    @Inject(method = "onStackReturnedToNetwork", at = @At("HEAD"))
+    private void ae2helpers$onStackReturned(GenericStack stack, CallbackInfo ci) {
+        if (stack == null || ae2helpers$expectedResults.isEmpty()) return;
+        ae2helpers$expectedResults.computeIfPresent(stack.what(), (k, v) -> {
+            var remaining = v - stack.amount();
+            return remaining > 0 ? remaining : null;
+        });
+        var be = this.host.getBlockEntity();
+        if (be != null && be.getLevel() != null) ae2helpers$lastImportTick = be.getLevel().getGameTime();
     }
 
     @Unique
@@ -111,6 +138,10 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
 
         var craftingService = grid.getCraftingService();
         if (craftingService == null) return;
+
+        var be = this.host.getBlockEntity();
+        var gameTime = (be != null && be.getLevel() != null) ? be.getLevel().getGameTime() : 0L;
+        var idleTicks = gameTime - ae2helpers$lastImportTick;
 
         // forget confirmations for keys we no longer expect
         ae2helpers$confirmedCrafts.retainAll(ae2helpers$expectedResults.keySet());
@@ -124,15 +155,11 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
             var totalRequested = craftingService.getRequestedAmount(key);
 
             if (totalRequested > 0) {
+                // do NOT cap to what AE2 still wants: the machine already has the inputs and will produce
+                // the full recorded amount (AE2 finishes the job once the request is delivered, leaving surplus).
                 ae2helpers$confirmedCrafts.add(key);
-                if (entry.getValue() > totalRequested) {
-                    entry.setValue(totalRequested);
-                    changed = true;
-                }
-            } else if (ae2helpers$confirmedCrafts.contains(key)) {
-                // getRequestedAmount only becomes a reliable "craft finished" signal after the crafting
-                // service has actually tracked this key. A transient 0 (right after pushing, or on world
-                // load before the job re-registers) must not drop the expectation and strand results.
+            } else if (ae2helpers$confirmedCrafts.contains(key) && idleTicks > AEHELPERS$IMPORT_IDLE_TIMEOUT) {
+                // Only give up once AE2 finished the craft AND the machine stopped yielding for a while.
                 it.remove();
                 ae2helpers$confirmedCrafts.remove(key);
                 changed = true;
@@ -147,8 +174,11 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
         if (!this.mainNode.isActive()) return;
 
         if (!ae2helpers$hasImportCard()) {
-            if (!ae2helpers$expectedResults.isEmpty()) {
+            if (ae2helpers$hasRedstoneCard()) {
+                if (!ae2helpers$expectedResults.isEmpty()) ae2helpers$syncWithCraftingService();
+            } else if (!ae2helpers$expectedResults.isEmpty()) {
                 ae2helpers$expectedResults.clear();
+                ae2helpers$confirmedCrafts.clear();
                 this.saveChanges();
             }
             return;
@@ -187,7 +217,7 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
     private void ae2helpers$hasWorkToDo(CallbackInfoReturnable<Boolean> cir) {
         if (cir.getReturnValue()) return;
 
-        if (ae2helpers$hasRedstoneCard()) {
+        if (ae2helpers$hasRedstoneWork()) {
             cir.setReturnValue(true);
             return;
         }
@@ -240,6 +270,7 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
 
         var importedMap = context.getImportedItems();
         if (!importedMap.isEmpty()) {
+            ae2helpers$lastImportTick = level.getGameTime();
             if (!ae2helpers$expectedResults.isEmpty()) {
                 var changed = false;
                 var it = ae2helpers$expectedResults.entrySet().iterator();
@@ -323,19 +354,25 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
 
     @Unique
     private boolean ae2helpers$isCraftingActive() {
-        var grid = this.mainNode.getGrid();
-        if (grid == null) return false;
-        var craftingService = grid.getCraftingService();
-        if (craftingService == null) return false;
+        // driven purely by what THIS provider pushed and is still waiting to come back (populated in
+        // pushPattern, reduced by imports / provider returns / a linked import bus, expired by the idle timeout).
+        return !ae2helpers$expectedResults.isEmpty();
+    }
 
-        for (var pattern : this.getAvailablePatterns()) {
-            for (var output : pattern.getOutputs()) {
-                if (output != null && craftingService.isRequesting(output.what())) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    @Unique
+    private boolean ae2helpers$hasRedstoneWork() {
+        if (!ae2helpers$hasRedstoneCard()) return false;
+        if (!ae2helpers$expectedResults.isEmpty()) return true;
+        var be = this.host.getBlockEntity();
+        var now = (be != null && be.getLevel() != null) ? be.getLevel().getGameTime() : 0L;
+        if (ae2helpers$pulseEndTick > now) return true;
+        return ae2helpers$emitting != ae2helpers$idleEmitting();
+    }
+
+    @Unique
+    private boolean ae2helpers$idleEmitting() {
+        var config = ae2helpers$getRedstoneConfig();
+        return config != null && config.mode() == RedstoneMode.INVERTED;
     }
 
     @Unique

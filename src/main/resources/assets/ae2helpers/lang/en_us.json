@@ -1,6 +1,15 @@
 {
   "item.ae2helpers.result_import_card": "Crafting Result Import Card",
   "item.ae2helpers.redstone_card": "Pattern Provider Redstone Card",
+  "item.ae2helpers.redstone_link_card": "Redstone Link Card",
+
+  "gui.ae2helpers.redstone_link": "Redstone Link Card",
+  "ae2helpers.redstonelink.pattern": "Import Bus",
+  "ae2helpers.redstonelink.linked": "Linked to provider at %s",
+  "ae2helpers.redstonelink.tooltip.linked": "Linked: %s",
+  "ae2helpers.redstonelink.tooltip.unlinked": "Not linked",
+  "ae2helpers.redstonelink.tooltip.hint": "Sneak-right-click a pattern provider to link, then put this in an import bus",
+
 
   "ae2helpers.redstonecard.pattern": "Emits a redstone signal while one of this provider's patterns is being crafted",
   "ae2helpers.redstonecard.screen.title": "Redstone Card Configuration",

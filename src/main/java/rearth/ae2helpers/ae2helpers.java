@@ -24,8 +24,11 @@ import rearth.ae2helpers.network.UpdateImportCardPacket;
 import rearth.ae2helpers.network.UpdateRedstoneCardPacket;
 import rearth.ae2helpers.util.ImportCardConfig;
 import rearth.ae2helpers.util.ImportCardItem;
+import rearth.ae2helpers.util.ProviderLink;
 import rearth.ae2helpers.util.RedstoneCardConfig;
 import rearth.ae2helpers.util.RedstoneCardItem;
+import rearth.ae2helpers.util.RedstoneLinkCard;
+import appeng.core.definitions.AEParts;
 
 @Mod(ae2helpers.MODID)
 public class ae2helpers {
@@ -53,12 +56,22 @@ public class ae2helpers {
                                                           .networkSynchronized(RedstoneCardConfig.STREAM_CODEC)
                                                           .cacheEncoding()
                                                           .build());
+
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<ProviderLink>> REDSTONE_LINK =
+      COMPONENTS.register("redstone_link", () -> DataComponentType.<ProviderLink>builder()
+                                                   .persistent(ProviderLink.CODEC)
+                                                   .networkSynchronized(ProviderLink.STREAM_CODEC)
+                                                   .cacheEncoding()
+                                                   .build());
     
     public static final DeferredItem<Item> RESULT_IMPORT_CARD =
       ITEMS.registerItem("result_import_card", ImportCardItem::new, new Item.Properties());
 
     public static final DeferredItem<Item> REDSTONE_CARD =
       ITEMS.registerItem("redstone_card", RedstoneCardItem::new, new Item.Properties());
+
+    public static final DeferredItem<Item> REDSTONE_LINK_CARD =
+      ITEMS.registerItem("redstone_link_card", RedstoneLinkCard::new, new Item.Properties());
 
     
     public ae2helpers(IEventBus modEventBus, ModContainer modContainer) {
@@ -80,6 +93,7 @@ public class ae2helpers {
         // ideally we'd define the machine(s) as target here, but that then breaks with other mods that add upgrades to the machine
         Upgrades.add(RESULT_IMPORT_CARD.get(), RESULT_IMPORT_CARD, 1, "gui.ae2helpers.import_card");
         Upgrades.add(REDSTONE_CARD.get(), RESULT_IMPORT_CARD, 1, "gui.ae2helpers.import_card");
+        Upgrades.add(REDSTONE_LINK_CARD.get(), AEParts.IMPORT_BUS, 1, "gui.ae2helpers.redstone_link");
 
     }
     
@@ -87,6 +101,7 @@ public class ae2helpers {
         if (event.getTabKey() == AECreativeTabIds.MAIN) {
             event.accept(RESULT_IMPORT_CARD);
             event.accept(REDSTONE_CARD);
+            event.accept(REDSTONE_LINK_CARD);
         }
     }
     
