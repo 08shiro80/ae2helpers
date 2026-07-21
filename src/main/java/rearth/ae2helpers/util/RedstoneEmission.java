@@ -9,11 +9,11 @@ public final class RedstoneEmission {
     }
 
     public static int weak(IProviderRedstoneHost host, Direction queryDirection) {
-        return host.ae2helpers$isEmittingRedstone() && matchesSide(host, queryDirection) ? 15 : 0;
+        return host.ae2helpers$isEmittingRedstone() && matchesSide(host, queryDirection) ? host.ae2helpers$getRedstoneSignalStrength() : 0;
     }
 
     public static int strong(IProviderRedstoneHost host, Direction queryDirection) {
-        return host.ae2helpers$isEmittingStrongRedstone() && matchesSide(host, queryDirection) ? 15 : 0;
+        return host.ae2helpers$isEmittingStrongRedstone() && matchesSide(host, queryDirection) ? host.ae2helpers$getRedstoneSignalStrength() : 0;
     }
 
     private static boolean matchesSide(IProviderRedstoneHost host, Direction queryDirection) {

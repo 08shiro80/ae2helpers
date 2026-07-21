@@ -36,6 +36,7 @@ import rearth.ae2helpers.util.PatternProviderImportContext;
 import rearth.ae2helpers.util.RedstoneCardConfig;
 import rearth.ae2helpers.util.RedstoneMode;
 
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -260,14 +261,18 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
 
         var overriddenSide = config.overriddenDirection();
 
-        // Config direction changed -> drop all cached strategies so they get rebuilt with the new face.
+        // Which neighbours to import from: the explicit "Import Side", or every side the provider pushes to.
+        // With an override the result is pulled from that side even if the provider pushes somewhere else.
+        Collection<Direction> importSides = overriddenSide != null ? List.of(overriddenSide) : targets;
+
+        // Config direction changed -> drop all cached strategies so they get rebuilt for the new side.
         if (this.ae2helpers$lastUsedConfigDirection != overriddenSide) {
             this.ae2helpers$importStrategies.clear();
             this.ae2helpers$lastUsedConfigDirection = overriddenSide;
         }
 
-        // Drop cached strategies for sides that are no longer valid targets (e.g. push direction changed).
-        this.ae2helpers$importStrategies.keySet().removeIf(side -> !targets.contains(side));
+        // Drop cached strategies for sides we no longer import from (push direction / override changed).
+        this.ae2helpers$importStrategies.keySet().removeIf(side -> !importSides.contains(side));
 
         var context = new PatternProviderImportContext(
           this.mainNode.getGrid().getStorageService(),
@@ -277,13 +282,11 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
           config.resultsOnly() // Pass the mode
         );
 
-        // Import from every side the provider pushes to. Only the side(s) with a real machine will
-        // yield anything; in "results only" mode the context filter additionally restricts to expected results.
-        for (var side : targets) {
-            var strategy = this.ae2helpers$importStrategies.computeIfAbsent(side, s -> {
-                var targetFace = overriddenSide != null ? overriddenSide : s.getOpposite();
-                return StackWorldBehaviors.createImportFacade(level, pos.relative(s), targetFace, (type) -> true);
-            });
+        // Only the side(s) with a real machine will yield anything; in "results only" mode the context
+        // filter additionally restricts to expected results.
+        for (var side : importSides) {
+            var strategy = this.ae2helpers$importStrategies.computeIfAbsent(side, s ->
+                StackWorldBehaviors.createImportFacade(level, pos.relative(s), s.getOpposite(), (type) -> true));
 
             strategy.transfer(context);
 
@@ -367,6 +370,12 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
     public Direction ae2helpers$getRedstoneSide() {
         var config = ae2helpers$getRedstoneConfig();
         return config == null ? null : config.side();
+    }
+
+    @Override
+    public int ae2helpers$getRedstoneSignalStrength() {
+        var config = ae2helpers$getRedstoneConfig();
+        return config == null ? RedstoneCardConfig.DEFAULT_SIGNAL_STRENGTH : config.signalStrength();
     }
 
     @Unique

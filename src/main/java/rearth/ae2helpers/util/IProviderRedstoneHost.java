@@ -13,4 +13,7 @@ public interface IProviderRedstoneHost {
 
     // the block face the signal is restricted to, or null for all sides
     @Nullable Direction ae2helpers$getRedstoneSide();
+
+    // the configured redstone power level (1-15) to emit while active
+    int ae2helpers$getRedstoneSignalStrength();
 }

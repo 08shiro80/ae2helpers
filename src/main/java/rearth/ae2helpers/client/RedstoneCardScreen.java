@@ -1,6 +1,7 @@
 package rearth.ae2helpers.client;
 
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.Tooltip;
@@ -47,7 +48,7 @@ public class RedstoneCardScreen extends Screen {
                            .withTooltip(val -> modeTooltip)
                            .withInitialValue(currentConfig.mode())
                            .create(centerX - 80, startY, 200, 20, Component.translatable("ae2helpers.redstonecard.mode"),
-                             (btn, val) -> updateConfig(currentConfig.strongSignal(), val, currentConfig.side(), currentConfig.pulseLength()));
+                             (btn, val) -> updateConfig(currentConfig.strongSignal(), val, currentConfig.side(), currentConfig.pulseLength(), currentConfig.signalStrength()));
         this.addRenderableWidget(modeButton);
 
         var pulseTooltip = Tooltip.create(Component.translatable("ae2helpers.redstonecard.pulse.tooltip"));
@@ -57,7 +58,7 @@ public class RedstoneCardScreen extends Screen {
                             .withTooltip(val -> pulseTooltip)
                             .withInitialValue(PULSE_LENGTHS.contains(currentConfig.pulseLength()) ? currentConfig.pulseLength() : RedstoneCardConfig.DEFAULT_PULSE_LENGTH)
                             .create(centerX - 80, startY + 25, 200, 20, Component.translatable("ae2helpers.redstonecard.pulse"),
-                              (btn, val) -> updateConfig(currentConfig.strongSignal(), currentConfig.mode(), currentConfig.side(), val));
+                              (btn, val) -> updateConfig(currentConfig.strongSignal(), currentConfig.mode(), currentConfig.side(), val, currentConfig.signalStrength()));
         this.addRenderableWidget(pulseButton);
 
         var strongTooltip = Tooltip.create(Component.translatable("ae2helpers.redstonecard.strong.tooltip"));
@@ -66,7 +67,7 @@ public class RedstoneCardScreen extends Screen {
                           .pos(centerX - 80, startY + 53)
                           .selected(currentConfig.strongSignal())
                           .tooltip(strongTooltip)
-                          .onValueChange((box, val) -> updateConfig(val, currentConfig.mode(), currentConfig.side(), currentConfig.pulseLength()))
+                          .onValueChange((box, val) -> updateConfig(val, currentConfig.mode(), currentConfig.side(), currentConfig.pulseLength(), currentConfig.signalStrength()))
                           .build();
         this.addRenderableWidget(strongBox);
 
@@ -81,8 +82,34 @@ public class RedstoneCardScreen extends Screen {
                            .withTooltip(val -> sideTooltip)
                            .withInitialValue(Optional.ofNullable(currentConfig.side()))
                            .create(centerX - 80, startY + 78, 200, 20, Component.translatable("ae2helpers.redstonecard.side"),
-                             (btn, val) -> updateConfig(currentConfig.strongSignal(), currentConfig.mode(), val.orElse(null), currentConfig.pulseLength()));
+                             (btn, val) -> updateConfig(currentConfig.strongSignal(), currentConfig.mode(), val.orElse(null), currentConfig.pulseLength(), currentConfig.signalStrength()));
         this.addRenderableWidget(sideButton);
+
+        var strengthTooltip = Tooltip.create(Component.translatable("ae2helpers.redstonecard.strength.tooltip"));
+        var strengthSlider = new StrengthSlider(centerX - 80, startY + 103, 200, 20, currentConfig.signalStrength());
+        strengthSlider.setTooltip(strengthTooltip);
+        this.addRenderableWidget(strengthSlider);
+    }
+
+    private class StrengthSlider extends AbstractSliderButton {
+        StrengthSlider(int x, int y, int width, int height, int strength) {
+            super(x, y, width, height, Component.empty(), (Math.max(1, Math.min(15, strength)) - 1) / 14.0);
+            updateMessage();
+        }
+
+        private int strength() {
+            return 1 + (int) Math.round(this.value * 14);
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("ae2helpers.redstonecard.strength.value", strength()));
+        }
+
+        @Override
+        protected void applyValue() {
+            updateConfig(currentConfig.strongSignal(), currentConfig.mode(), currentConfig.side(), currentConfig.pulseLength(), strength());
+        }
     }
 
     private Component getModeName(RedstoneMode mode) {
@@ -94,8 +121,8 @@ public class RedstoneCardScreen extends Screen {
         return Component.literal(dir.getName().substring(0, 1).toUpperCase() + dir.getName().substring(1));
     }
 
-    private void updateConfig(boolean strong, RedstoneMode mode, Direction side, int pulseLength) {
-        this.currentConfig = new RedstoneCardConfig(strong, mode, side, pulseLength);
+    private void updateConfig(boolean strong, RedstoneMode mode, Direction side, int pulseLength, int signalStrength) {
+        this.currentConfig = new RedstoneCardConfig(strong, mode, side, pulseLength, signalStrength);
         PacketDistributor.sendToServer(new UpdateRedstoneCardPacket(currentConfig));
     }
 

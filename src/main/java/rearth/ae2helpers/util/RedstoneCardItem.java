@@ -51,7 +51,8 @@ public class RedstoneCardItem extends ProviderUpgradeCardItem {
         tooltipComponents.add(Component.translatable("ae2helpers.redstonecard.tooltip.signal").withStyle(ChatFormatting.GRAY)
                                 .append(config.strongSignal()
                                           ? Component.translatable("ae2helpers.redstonecard.tooltip.strong").withStyle(ChatFormatting.GOLD)
-                                          : Component.translatable("ae2helpers.redstonecard.tooltip.weak").withStyle(ChatFormatting.AQUA)));
+                                          : Component.translatable("ae2helpers.redstonecard.tooltip.weak").withStyle(ChatFormatting.AQUA))
+                                .append(Component.translatable("ae2helpers.redstonecard.tooltip.strength", config.signalStrength()).withStyle(ChatFormatting.GRAY)));
 
         var side = config.side();
         var sideText = (side == null)

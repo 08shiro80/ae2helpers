@@ -5,6 +5,10 @@
 - Fix: crafting results no longer get stuck in the machine — the pending result was dropped as soon as the crafting service reported 0, which happened before the crafting CPU had registered the job (and again on world load), stranding the output
 - Fix: import card now works on pattern provider blocks left in the default "push to all sides" mode (previously it only worked when a single push direction was set, e.g. the cable part form)
 - Add: Advanced AE pattern provider support (regular + small, block + part)
+- Add: redstone card signal strength — configure the emitted power level (1-15) with a slider, so comparators / LittleBigRedstone can tell different sources apart
+- Add: the redstone signal now lingers for 3s after crafting stops, so back-to-back crafts don't rapidly toggle it (each toggle is a neighbour update — this avoids TPS churn with many machines)
+- Change: the import card's "Import Side" now selects which side of the provider to import from, independent of the push direction — pull results from a different side than the provider pushes to ("Auto" keeps importing from the push side(s))
+- Fix: redstone signal could freeze on while a machine kept yielding results (and wouldn't reset when the redstone card was pulled but the import card stayed) — the emission is now recomputed every tick and on card changes
 
 ## 1.0.1
 - Allow card to be sneak-clicked into pattern providers

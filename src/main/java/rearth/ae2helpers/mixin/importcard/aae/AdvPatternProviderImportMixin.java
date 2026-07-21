@@ -36,6 +36,7 @@ import rearth.ae2helpers.util.PatternProviderImportContext;
 import rearth.ae2helpers.util.RedstoneCardConfig;
 import rearth.ae2helpers.util.RedstoneMode;
 
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -246,12 +247,16 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
 
         var overriddenSide = config.overriddenDirection();
 
+        // Which neighbours to import from: the explicit "Import Side", or every side the provider pushes to.
+        // With an override the result is pulled from that side even if the provider pushes somewhere else.
+        Collection<Direction> importSides = overriddenSide != null ? List.of(overriddenSide) : targets;
+
         if (this.ae2helpers$lastUsedConfigDirection != overriddenSide) {
             this.ae2helpers$importStrategies.clear();
             this.ae2helpers$lastUsedConfigDirection = overriddenSide;
         }
 
-        this.ae2helpers$importStrategies.keySet().removeIf(side -> !targets.contains(side));
+        this.ae2helpers$importStrategies.keySet().removeIf(side -> !importSides.contains(side));
 
         var context = new PatternProviderImportContext(
           this.mainNode.getGrid().getStorageService(),
@@ -261,11 +266,9 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
           config.resultsOnly()
         );
 
-        for (var side : targets) {
-            var strategy = this.ae2helpers$importStrategies.computeIfAbsent(side, s -> {
-                var targetFace = overriddenSide != null ? overriddenSide : s.getOpposite();
-                return StackWorldBehaviors.createImportFacade(level, pos.relative(s), targetFace, (type) -> true);
-            });
+        for (var side : importSides) {
+            var strategy = this.ae2helpers$importStrategies.computeIfAbsent(side, s ->
+                StackWorldBehaviors.createImportFacade(level, pos.relative(s), s.getOpposite(), (type) -> true));
 
             strategy.transfer(context);
 
@@ -347,6 +350,12 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
     public Direction ae2helpers$getRedstoneSide() {
         var config = ae2helpers$getRedstoneConfig();
         return config == null ? null : config.side();
+    }
+
+    @Override
+    public int ae2helpers$getRedstoneSignalStrength() {
+        var config = ae2helpers$getRedstoneConfig();
+        return config == null ? RedstoneCardConfig.DEFAULT_SIGNAL_STRENGTH : config.signalStrength();
     }
 
     @Unique
