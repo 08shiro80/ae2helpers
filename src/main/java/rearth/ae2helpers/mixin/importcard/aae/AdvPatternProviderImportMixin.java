@@ -69,6 +69,8 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
     @Unique private boolean ae2helpers$emittingStrong = false;
     @Unique private boolean ae2helpers$wasCraftingActive = false;
     @Unique private long ae2helpers$pulseEndTick = 0;
+    @Unique private long ae2helpers$lastActiveTick = Long.MIN_VALUE;
+    @Unique private static final long AEHELPERS$REDSTONE_LINGER = 60;
 
     @Unique private int ae2helpers$cyclesSinceLastCheck = 0;
     @Unique private float ae2helpers$currentCycleDelay = 1f;
@@ -87,6 +89,9 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
     @Unique
     private void ae2helpers$onUpgradesChanged() {
         this.saveChanges();
+        // recompute emission on the spot so a card change (esp. pulling the redstone card) resets the signal
+        // immediately, instead of relying on the device to tick doWork again - which may never happen if it sleeps
+        ae2helpers$updateRedstone();
         // wake the device so the redstone state gets re-checked after a card change
         this.mainNode.ifPresent((grid, node) -> grid.getTickManager().alertDevice(node));
     }
@@ -171,6 +176,10 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
 
     @Inject(method = "doWork", at = @At("RETURN"), cancellable = true)
     private void ae2helpers$onDoWork(CallbackInfoReturnable<Boolean> cir) {
+        // must run first: this inject cancels doWork on a successful import, which would skip any later
+        // RETURN inject - so the redstone update has to happen here, before setReturnValue.
+        ae2helpers$updateRedstone();
+
         if (!this.mainNode.isActive()) return;
 
         if (!ae2helpers$hasImportCard()) {
@@ -206,11 +215,6 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
                 ae2helpers$syncWithCraftingService();
             }
         }
-    }
-
-    @Inject(method = "doWork", at = @At("RETURN"))
-    private void ae2helpers$redstoneDoWork(CallbackInfoReturnable<Boolean> cir) {
-        ae2helpers$updateRedstone();
     }
 
     @Inject(method = "hasWorkToDo", at = @At("RETURN"), cancellable = true)
@@ -387,17 +391,25 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
             ae2helpers$wasCraftingActive = false;
         } else {
             var active = ae2helpers$isCraftingActive();
+            if (active) ae2helpers$lastActiveTick = level.getGameTime();
+            // keep the state steady for a short linger after crafting stops, so back-to-back crafts don't
+            // rapidly toggle the signal (every toggle is a neighbor update -> avoids TPS churn with many machines)
+            var effectiveActive = active;
+            if (!active && ae2helpers$lastActiveTick != Long.MIN_VALUE) {
+                var sinceActive = level.getGameTime() - ae2helpers$lastActiveTick;
+                if (sinceActive >= 0 && sinceActive < AEHELPERS$REDSTONE_LINGER) effectiveActive = true;
+            }
             switch (config.mode()) {
-                case INVERTED -> newEmitting = !active;
+                case INVERTED -> newEmitting = !effectiveActive;
                 case PULSE -> {
-                    if (active != ae2helpers$wasCraftingActive) {
+                    if (effectiveActive != ae2helpers$wasCraftingActive) {
                         ae2helpers$pulseEndTick = level.getGameTime() + Math.max(1, config.pulseLength());
                     }
                     newEmitting = level.getGameTime() < ae2helpers$pulseEndTick;
                 }
-                default -> newEmitting = active;
+                default -> newEmitting = effectiveActive;
             }
-            ae2helpers$wasCraftingActive = active;
+            ae2helpers$wasCraftingActive = effectiveActive;
         }
         var newStrong = newEmitting && config != null && config.strongSignal();
 
