@@ -399,6 +399,12 @@ public abstract class PatternProviderImportMixin implements IPatternProviderUpgr
         var be = this.host.getBlockEntity();
         var now = (be != null && be.getLevel() != null) ? be.getLevel().getGameTime() : 0L;
         if (ae2helpers$pulseEndTick > now) return true;
+        // stay awake through the post-craft linger so its expiry is processed (esp. the Pulse-mode end pulse,
+        // which otherwise never fires because updateRedstone stops running once the device sleeps)
+        if (ae2helpers$lastActiveTick != Long.MIN_VALUE) {
+            var sinceActive = now - ae2helpers$lastActiveTick;
+            if (sinceActive >= 0 && sinceActive < AEHELPERS$REDSTONE_LINGER) return true;
+        }
         // stay awake until the emission has settled to its idle value (handles the craft-end transition
         // regardless of tick ordering); once settled the block keeps reporting the stored state while asleep
         return ae2helpers$emitting != ae2helpers$idleEmitting();

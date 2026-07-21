@@ -379,6 +379,12 @@ public abstract class AdvPatternProviderImportMixin implements IPatternProviderU
         var be = this.host.getBlockEntity();
         var now = (be != null && be.getLevel() != null) ? be.getLevel().getGameTime() : 0L;
         if (ae2helpers$pulseEndTick > now) return true;
+        // stay awake through the post-craft linger so its expiry is processed (esp. the Pulse-mode end pulse,
+        // which otherwise never fires because updateRedstone stops running once the device sleeps)
+        if (ae2helpers$lastActiveTick != Long.MIN_VALUE) {
+            var sinceActive = now - ae2helpers$lastActiveTick;
+            if (sinceActive >= 0 && sinceActive < AEHELPERS$REDSTONE_LINGER) return true;
+        }
         return ae2helpers$emitting != ae2helpers$idleEmitting();
     }
 
